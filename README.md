@@ -1,6 +1,6 @@
 # divSvault
 
-A CLI tool for navigating vault KV secrets under KV2 secret engine. 
+A CLI tool for navigating Hashicorp vault KV secrets under KV2 secret engine. 
 
 
 ## Usage
