@@ -28,46 +28,26 @@ func main() {
 	}
 
 	for {
-		// Fetch the list of secrets
-		secrets, err := listSecrets(*vaultAddr, *secretEngine, *token, *namespace)
-		if err != nil {
-			log.Printf("Error listing secrets: %v", err)
-			continue
+		// Create a prompt to select an action
+		actionPrompt := promptui.Select{
+			Label: "Select Action",
+			Items: []string{"List Secrets", "Add Secret", "Update Secret"},
 		}
 
-		// Create a search prompt to filter secrets
-		searchPrompt := promptui.Prompt{
-			Label: "Search Secret",
-		}
-
-		searchQuery, err := searchPrompt.Run()
+		_, action, err := actionPrompt.Run()
 		if err != nil {
 			log.Printf("Prompt failed %v\n", err)
 			os.Exit(0)
 		}
 
-		filteredSecrets := filterSecrets(secrets, searchQuery)
-
-		// Create a prompt to select a secret
-		selectPrompt := promptui.Select{
-			Label: "Select Secret",
-			Items: filteredSecrets,
+		switch action {
+		case "List Secrets":
+			listAndDisplaySecrets(*vaultAddr, *secretEngine, *token, *namespace, *outputFormat)
+		case "Add Secret":
+			addSecret(*vaultAddr, *secretEngine, *token, *namespace)
+		case "Update Secret":
+			updateSecret(*vaultAddr, *secretEngine, *token, *namespace)
 		}
-
-		_, result, err := selectPrompt.Run()
-		if err != nil {
-			log.Printf("Prompt failed %v\n", err)
-			os.Exit(0)
-		}
-
-		// Fetch and display the selected secret
-		secret, err := getSecret(*vaultAddr, *secretEngine, result, *token, *namespace)
-		if err != nil {
-			log.Printf("Error getting secret: %v", err)
-			continue
-		}
-
-		displaySecret(secret, *outputFormat)
 	}
 }
 
@@ -76,6 +56,45 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func listAndDisplaySecrets(vaultAddr, secretEngine, token, namespace, outputFormat string) {
+	secrets, err := listSecrets(vaultAddr, secretEngine, token, namespace)
+	if err != nil {
+		log.Printf("Error listing secrets: %v", err)
+		return
+	}
+
+	searchPrompt := promptui.Prompt{
+		Label: "Search Secret",
+	}
+
+	searchQuery, err := searchPrompt.Run()
+	if err != nil {
+		log.Printf("Prompt failed %v\n", err)
+		return
+	}
+
+	filteredSecrets := filterSecrets(secrets, searchQuery)
+
+	selectPrompt := promptui.Select{
+		Label: "Select Secret",
+		Items: filteredSecrets,
+	}
+
+	_, result, err := selectPrompt.Run()
+	if err != nil {
+		log.Printf("Prompt failed %v\n", err)
+		return
+	}
+
+	secret, err := getSecret(vaultAddr, secretEngine, result, token, namespace)
+	if err != nil {
+		log.Printf("Error getting secret: %v", err)
+		return
+	}
+
+	displaySecret(secret, outputFormat)
 }
 
 func listSecrets(vaultAddr, secretEngine, token, namespace string) ([]string, error) {
@@ -188,4 +207,105 @@ func displaySecret(secret, format string) {
 	default:
 		fmt.Println(secret)
 	}
+}
+
+func addSecret(vaultAddr, secretEngine, token, namespace string) {
+	keyPrompt := promptui.Prompt{
+		Label: "Secret Key",
+	}
+
+	key, err := keyPrompt.Run()
+	if err != nil {
+		log.Printf("Prompt failed %v\n", err)
+		return
+	}
+
+	valuePrompt := promptui.Prompt{
+		Label: "Secret Value",
+	}
+
+	value, err := valuePrompt.Run()
+	if err != nil {
+		log.Printf("Prompt failed %v\n", err)
+		return
+	}
+
+	secretData := map[string]interface{}{
+		key: value,
+	}
+
+	err = writeSecret(vaultAddr, secretEngine, key, secretData, token, namespace)
+	if err != nil {
+		log.Printf("Error adding secret: %v", err)
+	} else {
+		fmt.Println("Secret added successfully")
+	}
+}
+
+func updateSecret(vaultAddr, secretEngine, token, namespace string) {
+	keyPrompt := promptui.Prompt{
+		Label: "Secret Key",
+	}
+
+	key, err := keyPrompt.Run()
+	if err != nil {
+		log.Printf("Prompt failed %v\n", err)
+		return
+	}
+
+	valuePrompt := promptui.Prompt{
+		Label: "New Secret Value",
+	}
+
+	value, err := valuePrompt.Run()
+	if err != nil {
+		log.Printf("Prompt failed %v\n", err)
+		return
+	}
+
+	secretData := map[string]interface{}{
+		key: value,
+	}
+
+	err = writeSecret(vaultAddr, secretEngine, key, secretData, token, namespace)
+	if err != nil {
+		log.Printf("Error updating secret: %v", err)
+	} else {
+		fmt.Println("Secret updated successfully")
+	}
+}
+
+func writeSecret(vaultAddr, secretEngine, secretPath string, secretData map[string]interface{}, token, namespace string) error {
+	url := fmt.Sprintf("%s/v1/%s/data/%s", vaultAddr, secretEngine, secretPath)
+	data := map[string]interface{}{
+		"data": secretData,
+	}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(string(jsonData)))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Add("X-Vault-Token", token)
+	if namespace != "" {
+		req.Header.Add("X-Vault-Namespace", namespace)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to write secret: %s", resp.Status)
+	}
+
+	return nil
 }
