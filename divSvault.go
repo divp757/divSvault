@@ -27,16 +27,6 @@ func main() {
 		log.Fatal("Vault token is required")
 	}
 
-	// // Set up signal handling for graceful exit
-	// sigs := make(chan os.Signal, 1)
-	// signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	// go func() {
-	// 	sig := <-sigs
-	// 	fmt.Printf("\nReceived signal: %s. Exiting...\n", sig)
-	// 	os.Exit(0)
-	// }()
-
 	for {
 		// Fetch the list of secrets
 		secrets, err := listSecrets(*vaultAddr, *secretEngine, *token, *namespace)
