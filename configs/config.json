@@ -1,0 +1,22 @@
+{
+    "vaults": [
+        {
+            "name": "Vault 1 - root",
+            "address": "http://127.0.0.1:8200",
+            "namespace": "",
+            "username": "your-ldap-username",
+            "password": "your-ldap-password",
+            "ldap_group": "your-ldap-group",
+            "secretengine": "secret"
+        },
+        {
+            "name": "Vault 1",
+            "address": "http://127.0.0.2:8200",
+            "namespace": "another-namespace",
+            "username": "another-username",
+            "password": "another-password",
+            "ldap_group": "another-ldap-group",
+            "secretengine": "secret"
+        }
+    ]
+}
