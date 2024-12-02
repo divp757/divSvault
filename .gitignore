@@ -19,3 +19,7 @@ pkg/
 
 # Package directory contains cached intermediate files
 *.a
+
+
+#binary
+divSvault

@@ -1,12 +1,11 @@
 package main
 
 import (
+	"divSvault/utils"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
 	"strings"
 
@@ -20,6 +19,7 @@ func main() {
 	token := flag.String("token", getEnv("VAULT_TOKEN", ""), "Vault token")
 	namespace := flag.String("namespace", getEnv("VAULT_NAMESPACE", ""), "Vault namespace")
 	outputFormat := flag.String("output-format", "json", "Output format (json or text)")
+	apiPath := ""
 
 	flag.Parse()
 
@@ -42,7 +42,7 @@ func main() {
 
 		switch action {
 		case "List Secrets":
-			listAndDisplaySecrets(*vaultAddr, *secretEngine, *token, *namespace, *outputFormat)
+			listAndDisplaySecrets(*vaultAddr, *secretEngine, *token, apiPath, *namespace, *outputFormat)
 		case "Add Secret":
 			addSecret(*vaultAddr, *secretEngine, *token, *namespace)
 		case "Update Secret":
@@ -58,15 +58,15 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func listAndDisplaySecrets(vaultAddr, secretEngine, token, namespace, outputFormat string) {
-	secrets, err := listSecrets(vaultAddr, secretEngine, token, namespace)
+func listAndDisplaySecrets(vaultAddr, secretEngine, token, apiPath, namespace, outputFormat string) {
+	secrets, err := listSecrets(vaultAddr, secretEngine, token, apiPath, namespace)
 	if err != nil {
 		log.Printf("Error listing secrets: %v", err)
 		return
 	}
 
 	searchPrompt := promptui.Prompt{
-		Label: "Search Secret",
+		Label: "Search Secret or press Enter to see all the secres. > " + secretEngine + "/" + apiPath,
 	}
 
 	searchQuery, err := searchPrompt.Run()
@@ -88,48 +88,27 @@ func listAndDisplaySecrets(vaultAddr, secretEngine, token, namespace, outputForm
 		return
 	}
 
-	secret, err := getSecret(vaultAddr, secretEngine, result, token, namespace)
-	if err != nil {
-		log.Printf("Error getting secret: %v", err)
-		return
-	}
+	apiPath = apiPath + result
 
-	displaySecret(secret, outputFormat)
+	if strings.Contains(result, "/") {
+		listAndDisplaySecrets(vaultAddr, secretEngine, token, apiPath, namespace, outputFormat)
+	} else {
+		secret, err := getSecret(vaultAddr, secretEngine, apiPath, token, namespace)
+		if err != nil {
+			log.Printf("Error getting secret: %v", err)
+			return
+		}
+		displaySecret(secret, outputFormat)
+	}
 }
 
-func listSecrets(vaultAddr, secretEngine, token, namespace string) ([]string, error) {
-	url := fmt.Sprintf("%s/v1/%s/metadata", vaultAddr, secretEngine)
-	req, err := http.NewRequest("LIST", url, nil)
+func listSecrets(vaultAddr, secretEngine, token, apiPath, namespace string) ([]string, error) {
+	url := fmt.Sprintf("%s/v1/%s/metadata/%s", vaultAddr, secretEngine, apiPath)
+	var payload *strings.Reader = nil
+	data, err := utils.VaultRequest(url, "LIST", token, namespace, payload)
 	if err != nil {
-		return nil, err
+		log.Printf("Error making req: %v", err)
 	}
-
-	req.Header.Add("X-Vault-Token", token)
-	if namespace != "" {
-		req.Header.Add("X-Vault-Namespace", namespace)
-	}
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list secrets: %s", resp.Status)
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var data map[string]interface{}
-	if err := json.Unmarshal(body, &data); err != nil {
-		return nil, err
-	}
-
 	keys := data["data"].(map[string]interface{})["keys"].([]interface{})
 	secrets := make([]string, len(keys))
 	for i, key := range keys {
@@ -151,37 +130,11 @@ func filterSecrets(secrets []string, query string) []string {
 
 func getSecret(vaultAddr, secretEngine, secretPath, token, namespace string) (string, error) {
 	url := fmt.Sprintf("%s/v1/%s/data/%s", vaultAddr, secretEngine, secretPath)
-	req, err := http.NewRequest("GET", url, nil)
+	var payload *strings.Reader = nil
+	data, err := utils.VaultRequest(url, "GET", token, namespace, payload)
 	if err != nil {
-		return "", err
+		log.Printf("Error making req: %v", err)
 	}
-
-	req.Header.Add("X-Vault-Token", token)
-	if namespace != "" {
-		req.Header.Add("X-Vault-Namespace", namespace)
-	}
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to get secret: %s", resp.Status)
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var data map[string]interface{}
-	if err := json.Unmarshal(body, &data); err != nil {
-		return "", err
-	}
-
 	secretData := data["data"].(map[string]interface{})["data"].(map[string]interface{})
 	secret, err := json.MarshalIndent(secretData, "", "  ")
 	if err != nil {
@@ -284,28 +237,7 @@ func writeSecret(vaultAddr, secretEngine, secretPath string, secretData map[stri
 	if err != nil {
 		return err
 	}
-
-	req, err := http.NewRequest("POST", url, strings.NewReader(string(jsonData)))
-	if err != nil {
-		return err
-	}
-
-	req.Header.Add("X-Vault-Token", token)
-	if namespace != "" {
-		req.Header.Add("X-Vault-Namespace", namespace)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to write secret: %s", resp.Status)
-	}
+	utils.VaultRequest(url, "POST", token, namespace, strings.NewReader(string(jsonData)))
 
 	return nil
 }
